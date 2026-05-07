@@ -33,29 +33,28 @@ class EntrenarScreen(Screen):
         back_row.add_widget(btn_back)
         back_row.add_widget(Label(
             text="Entrenar Modelo",
-            font_size=22, bold=True, color=UI_GOLD,
+            font_size=32, bold=True, color=UI_NAVY,
             halign='center',
         ))
         back_row.add_widget(Widget(size_hint=(None, 1), width=90))
         outer.add_widget(back_row)
 
-        # Contenedor central de ancho fijo (900 px centrado)
+        # Contenedor central — fluido, se adapta al ancho disponible
         root = BoxLayout(orientation='vertical',
-                         size_hint=(None, 1), width=900,
-                         pos_hint={'center_x': 0.5}, spacing=10)
+                         size_hint=(1, 1), spacing=10)
 
         # ── Continuar desde modelo existente ─────────────────────────────────
         root.add_widget(Label(
             text="Continuar entrenando desde modelo existente (opcional):",
-            font_size=12, color=UI_TEXT_SOFT,
-            size_hint=(1, None), height=22,
+            font_size=16, bold=True, color=UI_TEXT_DARK,
+            size_hint=(1, None), height=28,
             halign='left', valign='middle',
         ))
         base_row = BoxLayout(orientation='horizontal',
-                             size_hint=(1, None), height=40, spacing=8)
+                             size_hint=(1, None), height=44, spacing=8)
         self._lbl_base = Label(
             text="Nuevo modelo desde cero",
-            font_size=12, color=(0.55, 0.80, 0.55, 1),
+            font_size=15, bold=True, color=UI_GREEN,
             size_hint=(1, 1), halign='left', valign='middle',
         )
         self._lbl_base.bind(size=lambda l, s: setattr(l, 'text_size', (s[0], None)))
@@ -81,14 +80,19 @@ class EntrenarScreen(Screen):
         # Label PGNs
         root.add_widget(Label(
             text="Archivos PGN disponibles — selecciona con cuáles entrenar:",
-            font_size=13, color=UI_TEXT_SOFT,
-            size_hint=(1, None), height=26,
+            font_size=16, bold=True, color=UI_TEXT_DARK,
+            size_hint=(1, None), height=30,
             halign='left', valign='middle',
         ))
 
         # ScrollView PGNs
-        pgn_scroll = ScrollView(size_hint=(1, None), height=160,
-                                do_scroll_x=False, bar_width=6)
+        pgn_scroll = ScrollView(
+            size_hint=(1, None), height=160, do_scroll_x=False,
+            scroll_type=['bars', 'content'],
+            bar_width=14,
+            bar_color=(0.08, 0.10, 0.43, 0.9),
+            bar_inactive_color=(0.08, 0.10, 0.43, 0.45),
+        )
         self._pgn_grid = GridLayout(cols=1, size_hint_y=None,
                                     spacing=4, padding=[4, 4])
         self._pgn_grid.bind(minimum_height=self._pgn_grid.setter('height'))
@@ -128,12 +132,17 @@ class EntrenarScreen(Screen):
 
         # Log de progreso
         root.add_widget(Label(
-            text="Progreso:", font_size=12, color=UI_TEXT_SOFT,
-            size_hint=(1, None), height=20,
+            text="Progreso:", font_size=16, bold=True, color=UI_TEXT_DARK,
+            size_hint=(1, None), height=26,
             halign='left', valign='middle',
         ))
-        self._log_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False,
-                                      bar_width=6)
+        self._log_scroll = ScrollView(
+            size_hint=(1, 1), do_scroll_x=False,
+            scroll_type=['bars', 'content'],
+            bar_width=14,
+            bar_color=(0.08, 0.10, 0.43, 0.9),
+            bar_inactive_color=(0.08, 0.10, 0.43, 0.45),
+        )
         self._log_grid   = GridLayout(cols=1, size_hint_y=None,
                                       spacing=2, padding=[4, 4])
         self._log_grid.bind(minimum_height=self._log_grid.setter('height'))
@@ -170,11 +179,11 @@ class EntrenarScreen(Screen):
             nombre = os.path.basename(ruta)
             btn = Button(
                 text=f"  {nombre}",
-                size_hint=(1, None), height=36,
+                size_hint=(1, None), height=40,
                 background_normal='',
                 background_color=UI_BG_ITEM,
                 color=UI_TEXT_DARK,
-                font_size=12, halign='left', valign='middle',
+                font_size=15, halign='left', valign='middle',
             )
             btn.bind(on_press=lambda b, r=ruta: self._toggle_pgn(r))
             self._pgn_btns[ruta] = btn
@@ -208,7 +217,13 @@ class EntrenarScreen(Screen):
             content.add_widget(Label(text="No hay modelos guardados todavía.",
                                      color=(1, 0.6, 0.6, 1)))
         else:
-            scroll = ScrollView(size_hint=(1, 1))
+            scroll = ScrollView(
+                size_hint=(1, 1),
+                scroll_type=['bars', 'content'],
+                bar_width=14,
+                bar_color=(0.08, 0.10, 0.43, 0.9),
+                bar_inactive_color=(0.08, 0.10, 0.43, 0.45),
+            )
             grid   = GridLayout(cols=1, size_hint_y=None, spacing=4)
             grid.bind(minimum_height=grid.setter('height'))
             popup_ref = [None]
@@ -317,8 +332,8 @@ class EntrenarScreen(Screen):
     def _agregar_log(self, texto):
         lbl = Label(
             text=texto,
-            size_hint=(1, None), height=22,
-            font_size=11, color=UI_TEXT_DARK,
+            size_hint=(1, None), height=24,
+            font_size=14, color=UI_TEXT_DARK,
             halign='left', valign='middle',
         )
         lbl.bind(size=lambda l, s: setattr(l, 'text_size', (s[0], None)))
@@ -373,8 +388,10 @@ class ProbarModeloScreen(Screen):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._sel_ruta = None
-        self._mod_btns = {}
+        self._sel_ruta      = None
+        self._mod_btns      = {}
+        self._selected_skin = DEFAULT_SKIN
+        self._skin_btns_p   = {}
 
         with self.canvas.before:
             Color(*UI_BG_PAGE)
@@ -397,27 +414,31 @@ class ProbarModeloScreen(Screen):
         back_row.add_widget(btn_back)
         back_row.add_widget(Label(
             text="Probar Modelo",
-            font_size=22, bold=True, color=UI_GOLD,
+            font_size=32, bold=True, color=UI_NAVY,
             halign='center',
         ))
         back_row.add_widget(Widget(size_hint=(None, 1), width=90))
         outer.add_widget(back_row)
 
-        # Contenedor central de ancho fijo (800 px centrado)
+        # Contenedor central — fluido, se adapta al ancho disponible
         root = BoxLayout(orientation='vertical',
-                         size_hint=(None, 1), width=800,
-                         pos_hint={'center_x': 0.5}, spacing=14)
+                         size_hint=(1, 1), spacing=14)
 
         root.add_widget(Label(
             text="Selecciona el modelo y el color que jugará contra el minimax:",
-            font_size=13, color=UI_TEXT_SOFT,
-            size_hint=(1, None), height=28,
+            font_size=17, bold=True, color=UI_TEXT_DARK,
+            size_hint=(1, None), height=34,
             halign='center',
         ))
 
         # Lista de modelos
-        mod_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False,
-                                bar_width=6)
+        mod_scroll = ScrollView(
+            size_hint=(1, 1), do_scroll_x=False,
+            scroll_type=['bars', 'content'],
+            bar_width=14,
+            bar_color=(0.08, 0.10, 0.43, 0.9),
+            bar_inactive_color=(0.08, 0.10, 0.43, 0.45),
+        )
         self._mod_grid = GridLayout(cols=1, size_hint_y=None,
                                     spacing=6, padding=[4, 4])
         self._mod_grid.bind(minimum_height=self._mod_grid.setter('height'))
@@ -430,8 +451,8 @@ class ProbarModeloScreen(Screen):
                               size_hint=(1, None), height=44, spacing=6)
         color_row.add_widget(Label(
             text="ML juega con:",
-            font_size=13, color=UI_TEXT_SOFT,
-            size_hint=(None, 1), width=140,
+            font_size=16, bold=True, color=UI_TEXT_DARK,
+            size_hint=(None, 1), width=160,
             halign='right', valign='middle',
         ))
         self._btn_blancas = Button(
@@ -451,6 +472,32 @@ class ProbarModeloScreen(Screen):
         color_row.add_widget(self._btn_blancas)
         color_row.add_widget(self._btn_negras)
         root.add_widget(color_row)
+
+        # ── Selector de skin ─────────────────────────────────────────────
+        skin_row = BoxLayout(orientation='horizontal',
+                             size_hint=(1, None), height=44, spacing=6)
+        skin_row.add_widget(Label(
+            text="Skin:",
+            font_size=16, bold=True, color=UI_TEXT_DARK,
+            size_hint=(None, 1), width=160,
+            halign='right', valign='middle',
+        ))
+        for key, lbl_txt in [('clasico', 'Clásico'),
+                             ('vocaloid', 'Vocaloid'),
+                             ('shield', 'Shield')]:
+            btn = Button(
+                text=lbl_txt,
+                background_normal='',
+                background_color=(COLOR_SKIN_SELECTED
+                                  if key == self._selected_skin
+                                  else COLOR_SKIN_NORMAL),
+                color=UI_WHITE,
+                font_size=14, bold=True,
+            )
+            btn.bind(on_press=lambda _, k=key: self._select_skin(k))
+            self._skin_btns_p[key] = btn
+            skin_row.add_widget(btn)
+        root.add_widget(skin_row)
 
         self._btn_probar = Button(
             text="Iniciar batalla  ML vs Minimax",
@@ -495,7 +542,7 @@ class ProbarModeloScreen(Screen):
                 size_hint=(1, 1),
                 background_normal='', background_color=UI_BG_ITEM,
                 color=UI_TEXT_DARK,
-                font_size=14, halign='left', valign='middle',
+                font_size=16, bold=True, halign='left', valign='middle',
             )
             btn.bind(size=lambda w, s: setattr(w, 'text_size', (s[0], None)))
             btn.bind(on_press=lambda b, r=ruta: self._seleccionar(r))
@@ -560,6 +607,12 @@ class ProbarModeloScreen(Screen):
         btn_no.bind(on_press=popup.dismiss)
         popup.open()
 
+    def _select_skin(self, key):
+        self._selected_skin = key
+        for k, btn in self._skin_btns_p.items():
+            btn.background_color = (COLOR_SKIN_SELECTED if k == key
+                                    else COLOR_SKIN_NORMAL)
+
     def _set_color(self, turno):
         self._ml_turno = turno
         if turno == 0:
@@ -584,7 +637,7 @@ class ProbarModeloScreen(Screen):
         app.ml_model_path = self._sel_ruta
         app.ml_turno      = self._ml_turno
         app.game_mode     = 'ml'
-        assets_dir = SKINS[DEFAULT_SKIN]
+        assets_dir = SKINS[self._selected_skin]
         game = self.manager.get_screen('game')
         game.setup(assets_dir, 'ml')
         self.manager.current = 'game'

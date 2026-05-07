@@ -1,6 +1,5 @@
-"""Lógica de exportación/importación de partidas en formato PGN.
-Las partidas se guardan en PARTIDAS_DIR con nombre YYYYMMDD_HHMMSS.pgn
-"""
+#Lógica de exportación/importación de partidas en formato PGN.
+
 
 import os
 import re

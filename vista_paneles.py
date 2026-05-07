@@ -19,7 +19,13 @@ class ChatPanel(BoxLayout):
             color=UI_NAVY,
         ))
 
-        scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        scroll = ScrollView(
+            size_hint=(1, 1), do_scroll_x=False,
+            scroll_type=['bars', 'content'],
+            bar_width=12,
+            bar_color=(0.08, 0.10, 0.43, 0.9),
+            bar_inactive_color=(0.08, 0.10, 0.43, 0.45),
+        )
         self._msg_grid = GridLayout(cols=1, size_hint_y=None, spacing=2, padding=[4, 2])
         self._msg_grid.bind(minimum_height=self._msg_grid.setter('height'))
         scroll.add_widget(self._msg_grid)
@@ -103,7 +109,13 @@ class MovePanel(BoxLayout):
         )
         self.add_widget(self._status_label)
 
-        self._scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        self._scroll = ScrollView(
+            size_hint=(1, 1), do_scroll_x=False,
+            scroll_type=['bars', 'content'],
+            bar_width=14,
+            bar_color=(0.08, 0.10, 0.43, 0.9),
+            bar_inactive_color=(0.08, 0.10, 0.43, 0.45),
+        )
         self._move_list = GridLayout(cols=1, size_hint_y=None, spacing=2)
         self._move_list.bind(minimum_height=self._move_list.setter('height'))
         self._scroll.add_widget(self._move_list)
@@ -154,10 +166,63 @@ class MovePanel(BoxLayout):
             self.board.pause()
         App.get_running_app().root.current = 'menu'
 
-    def _add_entry_ml(self, text, idx):
-        """Entrada simplificada para modo ML: sin bloque de análisis DAA."""
-        label_clean = text.replace('[', '').replace(']', '')
-        btn = Button(
+    def _add_entry_ml(self, text, idx, stats):
+        """Entrada ML con bloque expandible de análisis de complejidad."""
+        B = 4; F = 128; P = 4096; k = 12; d = 2; b = 30
+
+        valor       = stats.get('valor', 0.0)
+        conf        = stats.get('confianza', 0.0)
+        num_leg     = stats.get('num_legales', 0)
+        top3        = stats.get('dist_top3', [])
+
+        flops_red     = 64*14*F*9 + B*2*64*F*F*9 + 64*F*2 + 64*2*P + 64*F + 64*256 + 256
+        nodos_hibrido = k * (b ** (d - 1))
+        nodos_puro    = b ** d
+        reduccion     = max(0, int(100 * (1 - nodos_hibrido / max(nodos_puro, 1))))
+
+        if conf >= 40:
+            bg = (0.82, 0.92, 0.84, 1)
+        elif conf >= 15:
+            bg = (0.95, 0.92, 0.80, 1)
+        else:
+            bg = (0.92, 0.82, 0.82, 1)
+
+        top3_lines = ""
+        for i, (sq_d, sq_h, prob) in enumerate(top3, 1):
+            marker = "  <-- elegido" if i == 1 else ""
+            top3_lines += f"\n  {i}. {sq_d}-{sq_h}  {prob:>5.1f}%{marker}"
+
+        detalle = (
+            f"Paradigma: Red neuronal residual dual (AlphaZero)\n"
+            f"Estrategia complementaria: Minimax hibrido (top-{k})\n"
+            f"------------------------------------------------\n"
+            f"ARQUITECTURA DE LA RED\n"
+            f"  B bloques residuales = {B:>5}\n"
+            f"  F filtros por capa   = {F:>5}\n"
+            f"  P tamano policy      = {P:>5}\n"
+            f"  Complejidad red      = O(B*F^2+F*P)  ~{flops_red//1_000_000}M FLOPs\n"
+            f"------------------------------------------------\n"
+            f"SELECCION DEL MOVIMIENTO\n"
+            f"  Movs. legales (M)    = {num_leg:>5}\n"
+            f"  Ordenacion O(M*logM) = O({num_leg}*log{num_leg})\n"
+            f"  Candidatos top-k     = {k:>5}\n"
+            f"  Nodos hibrido O(k*b^(d-1)) = {nodos_hibrido:>5,}\n"
+            f"  Nodos puro    O(b^d) = {nodos_puro:>5,}\n"
+            f"  Reduccion vs puro    = {reduccion:>5}%\n"
+            f"------------------------------------------------\n"
+            f"EVALUACION DE LA POSICION\n"
+            f"  Valor red [-1,+1]    = {valor:>+.3f}\n"
+            f"  Confianza movimiento = {conf:>5.1f}%\n"
+            f"------------------------------------------------\n"
+            f"TOP MOVIMIENTOS (policy):{top3_lines}"
+        )
+
+        detail_height = detalle.count('\n') * 15 + 27
+        label_clean   = text.replace('[', '').replace(']', '')
+
+        container = BoxLayout(orientation='vertical', size_hint=(1, None), height=28)
+
+        header = Button(
             text=f"  {idx + 1:>3}. {label_clean}",
             size_hint=(1, None), height=28,
             background_normal='',
@@ -166,9 +231,42 @@ class MovePanel(BoxLayout):
             font_size=12,
             halign='left',
         )
-        btn.bind(size=lambda w, v: setattr(w, 'text_size', (v[0], v[1])))
-        self._move_list.add_widget(btn)
-        self._move_buttons.append(btn)
+        header.bind(size=lambda w, v: setattr(w, 'text_size', (v[0], v[1])))
+
+        detail_wrapper = BoxLayout(size_hint=(1, None), height=0, opacity=0)
+        with detail_wrapper.canvas.before:
+            Color(*bg)
+            rect = Rectangle(pos=detail_wrapper.pos, size=detail_wrapper.size)
+        detail_wrapper.bind(
+            pos =lambda _, v: setattr(rect, 'pos',  v),
+            size=lambda _, v: setattr(rect, 'size', v),
+        )
+        lbl = Label(
+            text=detalle,
+            size_hint=(1, 1),
+            font_size=11,
+            color=UI_TEXT_DARK,
+            halign='left', valign='top',
+        )
+        lbl.bind(size=lambda w, v: setattr(w, 'text_size', v))
+        detail_wrapper.add_widget(lbl)
+
+        def on_press(_):
+            if detail_wrapper.height == 0:
+                detail_wrapper.height  = detail_height
+                detail_wrapper.opacity = 1
+                container.height       = 28 + detail_height
+            else:
+                detail_wrapper.height  = 0
+                detail_wrapper.opacity = 0
+                container.height       = 28
+            self._on_move_clicked(idx)
+
+        header.bind(on_press=on_press)
+        container.add_widget(header)
+        container.add_widget(detail_wrapper)
+        self._move_list.add_widget(container)
+        self._move_buttons.append(header)
 
     def set_status(self, text):
         self._status_label.text = text
@@ -179,7 +277,7 @@ class MovePanel(BoxLayout):
 
     def add_entry(self, text, idx, stats):
         if self._mode == 'ml':
-            self._add_entry_ml(text, idx)
+            self._add_entry_ml(text, idx, stats)
             return
         b0 = stats.get('candidatos_disponibles', 0)
         b  = max(stats.get('movimientos_raiz', 1), 1)

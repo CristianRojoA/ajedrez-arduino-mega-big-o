@@ -41,11 +41,25 @@ class ChessBoard(Widget):
         self._num_mov_ml    = 0
         self._motor_ml_turno = None  # 0=ML juega blancas, 1=negras, None=ambos
 
+        self._captured_by_white = []  # piezas negras capturadas (esquina sup-der)
+        self._captured_by_black = []  # piezas blancas capturadas (esquina inf-izq)
+
         self.bind(pos=self._draw, size=self._draw)
         self._draw()
         self._pending_event = Clock.schedule_once(self._next_move, 1.0)
 
     # ── Assets ───────────────────────────────────────────────────────────────
+
+    def _rebuild_captures(self, up_to_idx=-1):
+        self._captured_by_white = []
+        self._captured_by_black = []
+        entries = self._history[:up_to_idx + 1] if up_to_idx >= 0 else self._history
+        for entry in entries:
+            p = entry.get('capturada', 0)
+            if p < 0:
+                self._captured_by_white.append(p)
+            elif p > 0:
+                self._captured_by_black.append(p)
 
     def _load_assets(self):
         textures = {}
@@ -91,6 +105,7 @@ class ChessBoard(Widget):
             self.turno       = self._live_turno
             self._historial  = dict(self._live_historial)
             self._live_saved = False
+        self._rebuild_captures()
         if not self._anim_active:
             self._pending_event = Clock.schedule_once(self._next_move, MOVE_DELAY)
 
@@ -102,6 +117,7 @@ class ChessBoard(Widget):
             self._anim_active = False
 
         self._reviewing = True
+        self._rebuild_captures(idx)
         entry = self._history[idx]
 
         # Restaurar tablero al estado previo al movimiento
@@ -163,8 +179,15 @@ class ChessBoard(Widget):
                     return
                 move  = mov_ml
                 conf  = round(dist.get(move, 0) * 100, 1) if dist else 0
-                stats = {'tipo': 'ml', 'valor': round(valor, 3),
-                         'confianza': conf}
+                top3  = sorted(dist.items(), key=lambda x: -x[1])[:3] if dist else []
+                stats = {
+                    'tipo':        'ml',
+                    'valor':       round(valor, 3),
+                    'confianza':   conf,
+                    'num_legales': len(dist),
+                    'dist_top3':   [(idx_to_sq(d), idx_to_sq(h), round(p * 100, 1))
+                                    for (d, h), p in top3],
+                }
             except Exception as e:
                 print(f"Error motor ML: {e}")
                 return
@@ -177,10 +200,16 @@ class ChessBoard(Widget):
         desde, hasta  = move
         board_before  = self.tablero[:]
         pieza_volando = self.tablero[desde]
+        capturada     = board_before[hasta]
 
         hacer_movimiento(self.tablero, desde, hasta)
         pieza_final = self.tablero[hasta]
         board_after = self.tablero[:]
+
+        if capturada < 0:
+            self._captured_by_white.append(capturada)
+        elif capturada > 0:
+            self._captured_by_black.append(capturada)
 
         move_idx = len(self._history)
         self._history.append({
@@ -190,6 +219,7 @@ class ChessBoard(Widget):
             'hasta':         hasta,
             'pieza_volando': pieza_volando,
             'pieza_final':   pieza_final,
+            'capturada':     capturada,
             'stats':         stats,
         })
 
@@ -204,7 +234,11 @@ class ChessBoard(Widget):
             self.on_move_cb(move_label, move_idx, stats)
 
         if self.on_status_cb:
-            self.on_status_cb("¡Jaque!" if jaque else "")
+            if jaque:
+                en_jaque = "Negras" if self.turno == 0 else "Blancas"
+                self.on_status_cb(f"¡{en_jaque} en jaque!")
+            else:
+                self.on_status_cb("")
 
         self._start_anim(desde, hasta, pieza_volando, pieza_final)
         self.turno = 1 - self.turno
@@ -338,6 +372,50 @@ class ChessBoard(Widget):
                     Rectangle(texture=self.textures[nombre],
                               pos=(px, oy + row * sq + poff),
                               size=(pw, ps))
+
+            # ── Piezas capturadas ─────────────────────────────────────────
+            _cgap    = 4                          # separación entre columnas
+            _ideal   = min(sq * 2 // 3, 60)      # tamaño ideal de icono
+
+            def _draw_caps(pieces, area_x, area_w, upward):
+                if area_w < 16:
+                    return
+                # determinar número de columnas según espacio disponible
+                nc = 2 if area_w >= 2 * _ideal + _cgap + 6 else 1
+                if nc == 2:
+                    cp = min(_ideal, (area_w - 6 - _cgap) // 2)
+                    tw = 2 * cp + _cgap
+                else:
+                    cp = min(_ideal, area_w - 6)
+                    tw = cp
+                step = cp + max(2, cp // 8)
+                sx   = area_x + (area_w - tw) // 2
+                for k, piece in enumerate(pieces):
+                    col_i = k % nc
+                    row_i = k // nc
+                    px_c  = sx + col_i * (cp + _cgap)
+                    py_c  = (oy + row_i * step if upward
+                             else oy + board_px - (row_i + 1) * step)
+                    if upward and py_c + cp > oy + board_px:
+                        break
+                    if not upward and py_c < oy:
+                        break
+                    _n = PIECE_NAMES.get(piece)
+                    if _n and _n in self.textures:
+                        Color(1, 1, 1, 1)
+                        Rectangle(texture=self.textures[_n],
+                                  pos=(px_c, py_c), size=(cp, cp))
+
+            # Inf-izq ↑ : piezas blancas comidas (capturadas por negras)
+            left_w  = max(0, (ox - frame) - bx)
+            _draw_caps(sorted(self._captured_by_black, key=lambda p: abs(p)),
+                       bx, left_w, upward=True)
+
+            # Sup-der ↓ : piezas negras comidas (capturadas por blancas)
+            right_x = ox + board_px + frame
+            right_w = max(0, (bx + w) - right_x)
+            _draw_caps(sorted(self._captured_by_white, key=lambda p: abs(p)),
+                       right_x, right_w, upward=False)
 
             # ── Pieza animada ─────────────────────────────────────────────
             if self._anim_active:

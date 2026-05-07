@@ -37,8 +37,6 @@ from datetime import datetime
 # python-chess imprime warnings por variantes desconocidas; los suprimimos
 logging.getLogger('chess.pgn').setLevel(logging.CRITICAL)
 
-from modeloraul import (hacer_movimiento, get_all_moves, esta_en_jaque)
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Rutas y constantes
 # ─────────────────────────────────────────────────────────────────────────────
@@ -474,53 +472,147 @@ class MotorML:
 
     # ── Inferencia ────────────────────────────────────────────────────────────
 
-    def predecir(self, tablero, turno, num_mov=0):
-        """Predice el mejor movimiento y la evaluacion de la posicion actual.
-
-        Parametros:
-            tablero : lista 64 ints (representacion de modeloraul)
-            turno   : 0 = blancas, 1 = negras
-            num_mov : numero de movimiento actual
-
-        Retorna:
-            movimiento   (desde, hasta) o None si no hay movimientos legales
-            distribucion dict {(desde, hasta): probabilidad} solo movs legales
-            valor        float en [-1, +1] (perspectiva del jugador actual)
+    def predecir_con_minimax(self, tablero, turno, num_mov=0, profundidad=2):
         """
+        Modo híbrido: usa la policy de la red para ordenar los movimientos
+        antes de pasarlos al Minimax. Esto combina lo mejor de ambos mundos:
+        - La red aporta intuición posicional
+        - El Minimax corrige errores tácticos
+
+        Complejidad asintotica (ver analizar_complejidad()):
+          Red:     O(B·F² + F·P)  — forward pass fijo, no crece con la posicion
+          Orden:   O(M·log M)     — M movimientos legales (M ≤ 218)
+          Minimax: O(k·b^(d-1))   — k candidatos top-policy, b ramas, d-1 niv.
+          TOTAL:   O(B·F² + k·b^(d-1))
+        """
+        from modeloraul import _minimax, _movimientos_legales, hacer_movimiento, _search_stats
+
         if self.modelo is None:
-            raise RuntimeError(
-                "Modelo no cargado. Llama a cargar_modelo() primero."
-            )
+            raise RuntimeError("Modelo no cargado.")
 
+        # 1. Obtener distribución de política de la red
         tensor = self.tablero_a_tensor(tablero, turno, num_mov)
-        X      = tensor[np.newaxis, ...]                  # (1, 8, 8, 14)
+        X = tensor[np.newaxis, ...]
         policy_vec, value_arr = self.modelo.predict(X, verbose=0)
-        policy_vec = policy_vec[0]                        # (4096,)
-        valor      = float(value_arr[0, 0])
+        policy_vec = policy_vec[0]
 
-        # Movimientos legales segun modeloraul
-        legales = []
-        for d, h in get_all_moves(tablero, turno):
-            copia = tablero[:]
-            hacer_movimiento(copia, d, h)
-            if not esta_en_jaque(copia, turno):
-                legales.append((d, h))
-
+        # 2. Obtener movimientos legales y ordenarlos por probabilidad ML
+        legales = _movimientos_legales(tablero, turno)
         if not legales:
-            return None, {}, valor
+            return None, {}, float(value_arr[0, 0])
 
-        # Distribucion sobre movimientos legales, renormalizada
-        dist  = {(d, h): float(policy_vec[self.mov_a_idx(d, h)])
-                 for d, h in legales}
-        total = sum(dist.values())
-        if total > 0:
-            dist = {k: v / total for k, v in dist.items()}
-        else:
-            prob = 1.0 / len(legales)
-            dist = {k: prob for k in legales}
+        # Ordenar de mayor a menor probabilidad según la policy  O(M log M)
+        legales_ordenados = sorted(
+            legales,
+            key=lambda mov: float(policy_vec[self.mov_a_idx(*mov)]),
+            reverse=True
+        )
 
-        mejor = max(dist, key=dist.get)
-        return mejor, dist, valor
+        # 3. Pasar los mejores N movimientos al Minimax (move ordering)
+        candidatos = legales_ordenados[:12]
+
+        mejor = None
+        if turno == 0:  # blancas: maximizar
+            mejor_val = float('-inf')
+            alpha = float('-inf')
+            for desde, hasta in candidatos:
+                nuevo = tablero[:]
+                hacer_movimiento(nuevo, desde, hasta)
+                val = _minimax(nuevo, profundidad - 1, 1, alpha, float('inf'))
+                if val > mejor_val:
+                    mejor_val = val
+                    mejor = (desde, hasta)
+                alpha = max(alpha, mejor_val)
+        else:  # negras: minimizar
+            mejor_val = float('inf')
+            beta = float('inf')
+            for desde, hasta in candidatos:
+                nuevo = tablero[:]
+                hacer_movimiento(nuevo, desde, hasta)
+                val = _minimax(nuevo, profundidad - 1, 0, float('-inf'), beta)
+                if val < mejor_val:
+                    mejor_val = val
+                    mejor = (desde, hasta)
+                beta = min(beta, mejor_val)
+
+        dist = {(d, h): float(policy_vec[self.mov_a_idx(d, h)]) for d, h in legales}
+        return mejor, dist, float(value_arr[0, 0])
+
+    predecir = predecir_con_minimax
+
+    def analizar_complejidad(self, profundidad=2, k_candidatos=12,
+                             b_medio=30, m_movimientos=30):
+        """Imprime el analisis de complejidad asintotica de la inferencia ML.
+
+        Variables:
+          B = bloques residuales,  F = filtros,  P = tamano politica (4096)
+          M = movimientos legales en la posicion  (max 218, prom ~30)
+          k = candidatos pasados al minimax (top-k de la policy)
+          d = profundidad del minimax hibrido
+          b = factor de ramificacion promedio
+
+        Retorna dict con los numeros calculados.
+        """
+        cfg = self.config['modelo']
+        F   = cfg.get('filtros', 128)
+        B   = cfg.get('bloques_residuales', 4)
+        P   = TAMANO_POLICY          # 4096
+        S   = 64                     # 8×8 fijo
+        C   = NUM_PLANOS             # 14 canales
+        d, k, b, M = profundidad, k_candidatos, b_medio, m_movimientos
+
+        # FLOPs aproximados de cada fase de la red
+        flops_conv_ini   = S * C * F * 9                  # Conv2D(F,3x3) entrada
+        flops_bloque     = 2 * S * F * F * 9              # dos Conv2D por bloque res.
+        flops_policy     = S * F * 2 + S * 2 * P          # Conv 1x1 + Dense(4096)
+        flops_value      = S * F + S * 256 + 256          # Conv 1x1 + Dense(256) + Dense(1)
+        flops_red        = flops_conv_ini + B * flops_bloque + flops_policy + flops_value
+
+        nodos_hibrido    = k * (b ** (d - 1)) if d > 1 else k
+        nodos_minimax_p  = b ** d
+        nodos_alpha_beta = int(b ** (d / 2))
+
+        lineas = [
+            "=" * 62,
+            "  Complejidad de inferencia ML — por decision",
+            "=" * 62,
+            f"  Arquitectura : B={B} bloques residuales, F={F} filtros, P={P}",
+            f"  Busqueda     : d={d} prof., k={k} candidatos, b≈{b} ramas",
+            "",
+            f"  {'Fase':<32} {'Complejidad':<18} FLOPs aprox",
+            "  " + "-" * 58,
+            f"  {'Codificacion tablero':<32} {'O(1)':<18} {S} casillas fijas",
+            f"  {'Conv inicial':<32} {'O(S·C·F·9)':<18} {flops_conv_ini:>10,}",
+            f"  {f'Torre residual ({B} bloques)':<32} {'O(B·F²·S·9)':<18} {B*flops_bloque:>10,}",
+            f"  {'Cabeza policy':<32} {'O(S·F·P)':<18} {flops_policy:>10,}",
+            f"  {'Cabeza valor':<32} {'O(S·F)':<18} {flops_value:>10,}",
+            f"  {'Red total (forward pass)':<32} {'O(B·F²+F·P)':<18} {flops_red:>10,}",
+            f"  {'Ordenar movimientos':<32} {'O(M·log M)':<18} M≤218, prom M≈{M}",
+            f"  {f'Minimax hibrido (top-{k})':<32} {'O(k·b^(d-1))':<18} {nodos_hibrido:>10,} nodos",
+            "  " + "-" * 58,
+            f"  {'TOTAL':<32} O(B·F² + k·b^(d-1))",
+            "",
+            "  Comparacion con Minimax puro:",
+            f"  {'Minimax puro  d='+str(d)+':':<32} O(b^d)        {nodos_minimax_p:>8,} nodos",
+            f"  {'Alpha-beta    d='+str(d)+':':<32} O(b^(d/2))    {nodos_alpha_beta:>8,} nodos (mejor caso)",
+            f"  {'ML hibrido    d='+str(d)+',k='+str(k)+':':<32} O(k·b^(d-1)) {nodos_hibrido:>8,} nodos",
+            "",
+            "  Nota: la red es O(1) respecto al estado del tablero",
+            "  (entrada siempre 8x8x14 fija). La ganancia real del",
+            "  modo hibrido es reducir la raiz del arbol de b^d",
+            "  a k·b^(d-1), con k << b.",
+            "=" * 62,
+        ]
+        for linea in lineas:
+            print(linea)
+
+        return {
+            'flops_red':              flops_red,
+            'nodos_hibrido':          nodos_hibrido,
+            'nodos_minimax_puro':     nodos_minimax_p,
+            'nodos_alphabeta_mejor':  nodos_alpha_beta,
+            'complejidad':            f'O(B·F² + k·b^(d-1))',
+        }
 
     # ── Persistencia ──────────────────────────────────────────────────────────
 

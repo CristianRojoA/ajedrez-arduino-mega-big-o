@@ -15,7 +15,7 @@ class MenuScreen(Screen):
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
-        root = BoxLayout(orientation='vertical', padding=[200, 60, 200, 60], spacing=24)
+        root = BoxLayout(orientation='vertical', padding=[60, 50, 60, 50], spacing=24)
 
         # Fila superior: botón volver al modo
         back_row = BoxLayout(orientation='horizontal', size_hint=(1, None), height=44)
@@ -129,9 +129,9 @@ class VideoScreen(Screen):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._assets_dir   = None
         self._transitioning = False
-        self._video        = None
+        self._video         = None
+        self._pending_path  = None
 
         with self.canvas.before:
             Color(0, 0, 0, 1)
@@ -144,25 +144,35 @@ class VideoScreen(Screen):
 
     def play(self, video_path):
         self._transitioning = False
+        self._pending_path  = video_path.replace('\\', '/')
+
+    def on_enter(self):
+        if self._pending_path:
+            self._setup_video(self._pending_path)
+            self._pending_path = None
+
+    def _setup_video(self, video_path):
         self.clear_widgets()
 
-        # StencilView = ventana de recorte del tamaño del tablero
-        clip = StencilView(
-            size=(BOARD_WIDTH, BOARD_HEIGHT),
-            size_hint=(None, None),
-            pos=(0, 0),
-        )
+        clip = StencilView(size_hint=(1, 1))
 
-        # Video ligeramente mayor → los bordes quedan fuera del clip
         self._video = Video(
             source=video_path,
             state='play',
             allow_stretch=True,
             keep_ratio=False,
-            size=(BOARD_WIDTH + CROP_PX * 2, BOARD_HEIGHT + CROP_PX * 2),
             size_hint=(None, None),
-            pos=(-CROP_PX, -CROP_PX),
         )
+
+        def _resize(*_):
+            if self.width and self.height:
+                self._video.size = (self.width + CROP_PX * 2,
+                                    self.height + CROP_PX * 2)
+                self._video.pos  = (self.x - CROP_PX, self.y - CROP_PX)
+
+        self.bind(size=_resize, pos=_resize)
+        _resize()
+
         self._video.bind(eos=lambda *_: self._ir_al_juego())
         clip.add_widget(self._video)
         self.add_widget(clip)
@@ -262,7 +272,13 @@ class PartidasScreen(Screen):
         root.add_widget(skin_row)
 
         # ── Lista de archivos PGN ─────────────────────────────────────────────
-        scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        scroll = ScrollView(
+            size_hint=(1, 1), do_scroll_x=False,
+            scroll_type=['bars', 'content'],
+            bar_width=14,
+            bar_color=(0.08, 0.10, 0.43, 0.9),
+            bar_inactive_color=(0.08, 0.10, 0.43, 0.45),
+        )
         self._lista = GridLayout(cols=1, size_hint_y=None, spacing=4)
         self._lista.bind(minimum_height=self._lista.setter('height'))
         scroll.add_widget(self._lista)
@@ -388,7 +404,9 @@ class GameScreen(Screen):
         self.clear_widgets()
         self._board = None
         is_ml = (mode == 'ml')
-        Window.size = (ML_BOARD_SIZE + PANEL_WIDTH, BOARD_HEIGHT) if is_ml else (BOARD_WIDTH + PANEL_WIDTH, BOARD_HEIGHT)
+        # No forzamos Window.size — el layout se adapta al tamaño actual de la
+        # ventana mediante size_hint. El usuario puede redimensionar/maximizar
+        # libremente.
 
         # Columna izquierda: tablero (arriba) + chat (abajo, sólo en modo ML)
         left_col  = BoxLayout(orientation='vertical', size_hint=(1, 1))

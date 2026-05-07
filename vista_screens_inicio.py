@@ -57,7 +57,7 @@ class ModeScreen(Screen):
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
-        root = BoxLayout(orientation='vertical', padding=[180, 60, 180, 60], spacing=20)
+        root = BoxLayout(orientation='vertical', padding=[60, 50, 60, 50], spacing=20)
 
         root.add_widget(Label(
             text="Ajedrez",
@@ -116,7 +116,7 @@ class MLScreen(Screen):
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
         root = BoxLayout(orientation='vertical',
-                         padding=[180, 60, 180, 60], spacing=20)
+                         padding=[60, 50, 60, 50], spacing=20)
 
         back_row = BoxLayout(orientation='horizontal',
                              size_hint=(1, None), height=44)

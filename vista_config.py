@@ -1,9 +1,13 @@
+import os
+os.environ.setdefault('KIVY_VIDEO', 'ffpyplayer')
+
 from kivy.config import Config
 Config.set('graphics', 'width', '1520')
 Config.set('graphics', 'height', '960')
-Config.set('graphics', 'resizable', '0')
+Config.set('graphics', 'resizable', '1')
+Config.set('graphics', 'minimum_width', '960')
+Config.set('graphics', 'minimum_height', '600')
 
-import os
 import glob
 import threading
 from kivy.app import App
@@ -41,11 +45,11 @@ SKINS = {
 }
 DEFAULT_SKIN = 'vocaloid'
 
-BOARD_WIDTH    = 960
+BOARD_WIDTH    = 960   # baseline para diseño; el tablero se adapta vía size_hint
 BOARD_HEIGHT   = 960
-PANEL_WIDTH    = 560
-ML_BOARD_SIZE  = 720   # tamaño del tablero en modo ML (debe ser múltiplo de 8)
-CHAT_HEIGHT    = 240   # altura del panel de chat en modo ML
+PANEL_WIDTH    = 460   # ancho fijo del panel lateral derecho
+ML_BOARD_SIZE  = 720   # baseline para modo ML (también responsive)
+CHAT_HEIGHT    = 220   # altura del panel de chat en modo ML
 SQUARE_SIZE    = BOARD_WIDTH // 8
 PIECE_SIZE     = int(SQUARE_SIZE * 0.85)
 PIECE_OFFSET   = (SQUARE_SIZE - PIECE_SIZE) // 2
